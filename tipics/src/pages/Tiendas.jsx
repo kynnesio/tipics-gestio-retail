@@ -96,16 +96,13 @@ export default function Tiendas() {
     if (!unitats || unitats <= 0) return
     const avui = new Date().toISOString().split('T')[0]
     const existent = stockItems.find(s => s.producto_id === productoId)
-    if (existent) {
-      await supabase.from('stock_tienda')
-        .update({ unidades_actuales: Number(existent.unidades_actuales) + unitats, fecha_ultimo_recuento: avui })
-        .eq('id', existent.id)
-    } else {
-      await supabase.from('stock_tienda').insert({
-        tienda_id: selectedTienda.id, producto_id: productoId,
-        unidades_actuales: unitats, fecha_ultimo_recuento: avui,
-      })
-    }
+    const nouTotal = existent ? Number(existent.unidades_actuales) + unitats : unitats
+    await supabase.from('stock_tienda').upsert({
+      tienda_id: selectedTienda.id,
+      producto_id: productoId,
+      unidades_actuales: nouTotal,
+      fecha_ultimo_recuento: avui,
+    }, { onConflict: 'tienda_id,producto_id' })
     // Animació entrada
     setAnimIn(prev => [...prev, productoId])
     await loadStock(selectedTienda.id)
