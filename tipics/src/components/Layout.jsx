@@ -2,63 +2,68 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const nav = [
-  { to: '/', label: 'Dashboard', icon: '▦' },
-  { to: '/tiendas', label: 'Botigues i estoc', icon: '🏪' },
-  { to: '/proveedores', label: 'Proveidors', icon: '🤝' },
-  { to: '/productos', label: 'Productes', icon: '📦' },
-  { to: '/recuentos', label: 'Recomptes', icon: '🔢' },
-  { to: '/liquidaciones', label: 'Liquidacions', icon: '💶' },
+  { to: '/', label: 'Dashboard', icon: '◻' },
+  { to: '/tiendas', label: 'Botigues i estoc', icon: '◫' },
+  { to: '/proveedores', label: 'Proveïdors', icon: '◈' },
+  { to: '/productos', label: 'Productes', icon: '◧' },
+  { to: '/recuentos', label: 'Recomptes', icon: '◱' },
+  { to: '/liquidaciones', label: 'Liquidacions', icon: '◰' },
 ]
 
 export default function Layout() {
   const navigate = useNavigate()
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    navigate('/login')
-  }
+  const handleLogout = async () => { await supabase.auth.signOut(); navigate('/login') }
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
       <aside style={{
-        width: 220, background: 'white',
-        borderRight: '0.5px solid rgba(0,0,0,0.1)',
+        width: 230, background: '#212322',
         display: 'flex', flexDirection: 'column',
-        padding: '1.5rem 0',
+        padding: '0',
         position: 'fixed', top: 0, left: 0, bottom: 0,
       }}>
-        <div style={{ padding: '0 1.25rem', marginBottom: '1.5rem' }}>
-          <div style={{ fontWeight: 600, fontSize: 18, color: '#1D9E75' }}>Típics</div>
-          <div style={{ fontSize: 11, color: '#6b6b68' }}>Gestió interna</div>
+        {/* Logo */}
+        <div style={{ padding: '1.75rem 1.5rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontFamily: "'Inter Tight', sans-serif", fontWeight: 300, fontSize: 22, color: '#E0C6AD', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            Típics
+          </div>
+          <div style={{ fontSize: 10, color: 'rgba(224,198,173,0.45)', marginTop: 2, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Gestió interna</div>
         </div>
-        <nav style={{ flex: 1 }}>
+
+        {/* Nav */}
+        <nav style={{ flex: 1, padding: '1rem 0' }}>
           {nav.map(({ to, label, icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
+            <NavLink key={to} to={to} end={to === '/'}
               style={({ isActive }) => ({
                 display: 'flex', alignItems: 'center', gap: 10,
-                padding: '9px 1.25rem',
-                fontSize: 14,
-                color: isActive ? '#1D9E75' : '#3a3a38',
-                background: isActive ? '#E1F5EE' : 'transparent',
-                borderRight: isActive ? '2px solid #1D9E75' : '2px solid transparent',
+                padding: '9px 1.5rem',
+                fontSize: 13,
+                color: isActive ? '#E0C6AD' : 'rgba(224,198,173,0.5)',
+                background: isActive ? 'rgba(224,198,173,0.07)' : 'transparent',
+                borderLeft: isActive ? '2px solid #956C58' : '2px solid transparent',
                 fontWeight: isActive ? 500 : 400,
+                transition: 'all 0.12s',
+                letterSpacing: '0.01em',
               })}
             >
-              <span style={{ fontSize: 16 }}>{icon}</span>
               {label}
             </NavLink>
           ))}
         </nav>
-        <div style={{ padding: '0 1.25rem' }}>
-          <button onClick={handleLogout} className="btn btn-sm" style={{ width: '100%', justifyContent: 'center', color: '#6b6b68' }}>
+
+        <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <button onClick={handleLogout} style={{
+            width: '100%', padding: '7px 0', background: 'transparent',
+            border: '1px solid rgba(224,198,173,0.2)', borderRadius: 6,
+            color: 'rgba(224,198,173,0.5)', fontSize: 12, cursor: 'pointer',
+            fontFamily: 'Inter Tight, sans-serif', letterSpacing: '0.04em',
+          }}>
             Tancar sessió
           </button>
         </div>
       </aside>
-      <main style={{ marginLeft: 220, flex: 1, padding: '2rem', maxWidth: 1200 }}>
+
+      <main style={{ marginLeft: 230, flex: 1, padding: '2rem 2.5rem', maxWidth: 1300, minHeight: '100vh' }}>
         <Outlet />
       </main>
     </div>
