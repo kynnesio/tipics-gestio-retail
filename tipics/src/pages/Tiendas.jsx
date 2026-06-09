@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import Estanteria3D from '../components/Estanteria3D'
 
@@ -301,7 +301,6 @@ export default function Tiendas() {
                     {productos.map((p, idx) => {
                       const color = COLORS[idx % COLORS.length]
                       const enEstoc = stockItems.find(s => s.producto_id === p.id)
-                      const inputRef = useRef(null)
                       return (
                         <div key={p.id} style={{ background: 'white', border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 8, padding: '7px 9px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
@@ -313,16 +312,17 @@ export default function Tiendas() {
                           </div>
                           <div style={{ display: 'flex', gap: 4 }}>
                             <input
-                              ref={inputRef}
+                              id={`afegir-${p.id}`}
                               type="number" min="1" placeholder="ud"
                               style={{ flex: 1, padding: '4px 5px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: 5, fontSize: 12 }}
                             />
                             <button
                               onClick={() => {
-                                const val = parseFloat(inputRef.current?.value)
+                                const input = document.getElementById(`afegir-${p.id}`)
+                                const val = parseFloat(input?.value)
                                 if (val > 0) {
                                   handleAfegirInline(p.id, val)
-                                  if (inputRef.current) inputRef.current.value = ''
+                                  if (input) input.value = ''
                                 }
                               }}
                               style={{ background: color, color: 'white', border: 'none', borderRadius: 5, padding: '4px 8px', fontSize: 12, cursor: 'pointer', fontWeight: 700 }}
