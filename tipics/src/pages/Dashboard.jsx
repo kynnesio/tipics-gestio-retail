@@ -6,20 +6,23 @@ export default function Dashboard() {
   const [stats, setStats] = useState({ tiendas: 0, productos: 0, proveedores: 0 })
   const [topProductos, setTopProductos] = useState([])
   const [topTiendas, setTopTiendas] = useState([])
+  const [tiendas, setTiendas] = useState([])
   const [loading, setLoading] = useState(true)
+  const [mapLoaded, setMapLoaded] = useState(false)
 
   useEffect(() => {
     async function load() {
-      const [t, p, pr, rec] = await Promise.all([
+      const [t, p, pr, rec, tiendasData] = await Promise.all([
         supabase.from('tiendas').select('id', { count: 'exact', head: true }).eq('activa', true),
         supabase.from('productos').select('id', { count: 'exact', head: true }).eq('activo', true),
         supabase.from('proveedores').select('id', { count: 'exact', head: true }),
         supabase.from('recuentos').select('unidades_vendidas, producto_id, tienda_id, productos(nombre, pvp), tiendas(nombre)'),
+        supabase.from('tiendas').select('id, nombre, direccion, zona, lat, lng, activa').eq('activa', true),
       ])
       setStats({ tiendas: t.count || 0, productos: p.count || 0, proveedores: pr.count || 0 })
+      setTiendas(tiendasData.data || [])
 
       if (rec.data) {
-        // Agrupar por producto
         const byProducto = {}
         rec.data.forEach(r => {
           const key = r.producto_id
@@ -29,7 +32,6 @@ export default function Dashboard() {
         })
         setTopProductos(Object.values(byProducto).sort((a, b) => b.ingressos - a.ingressos).slice(0, 5))
 
-        // Agrupar per tienda
         const byTienda = {}
         rec.data.forEach(r => {
           const key = r.tienda_id
@@ -42,6 +44,76 @@ export default function Dashboard() {
     }
     load()
   }, [])
+
+  useEffect(() => {
+    if (loading) return
+    if (mapLoaded) return
+
+    // Carrega Leaflet dinàmicament
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    document.head.appendChild(link)
+
+    const script = document.createElement('script')
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    script.onload = () => {
+      setMapLoaded(true)
+    }
+    document.head.appendChild(script)
+  }, [loading])
+
+  useEffect(() => {
+    if (!mapLoaded) return
+    const L = window.L
+    if (!L) return
+
+    const container = document.getElementById('mapa-tipics')
+    if (!container) return
+
+    // Evita reinicialitzar si ja existeix
+    if (container._leaflet_id) return
+
+    const map = L.map('mapa-tipics', {
+      center: [41.7, 1.8],
+      zoom: 8,
+      scrollWheelZoom: false,
+    })
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap',
+      maxZoom: 18,
+    }).addTo(map)
+
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="
+        width: 28px; height: 28px;
+        background: #1D9E75;
+        border: 2px solid white;
+        border-radius: 50%;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; color: white; font-weight: 700;
+      ">T</div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+    })
+
+    const ambCoords = tiendas.filter(t => t.lat && t.lng)
+    ambCoords.forEach(t => {
+      L.marker([t.lat, t.lng], { icon })
+        .addTo(map)
+        .bindPopup(`<strong>${t.nombre}</strong>${t.direccion ? '<br>' + t.direccion : ''}${t.zona ? '<br><span style="color:#6b6b68;font-size:12px">' + t.zona + '</span>' : ''}`)
+    })
+
+    if (ambCoords.length > 1) {
+      const bounds = L.latLngBounds(ambCoords.map(t => [t.lat, t.lng]))
+      map.fitBounds(bounds, { padding: [30, 30] })
+    }
+  }, [mapLoaded, tiendas])
+
+  const senseCoords = tiendas.filter(t => !t.lat || !t.lng).length
 
   if (loading) return <div style={{ color: '#6b6b68' }}>Carregant...</div>
 
@@ -60,6 +132,28 @@ export default function Dashboard() {
             <div style={{ fontSize: 28, fontWeight: 500 }}>{s.value}</div>
           </div>
         ))}
+      </div>
+
+      {/* MAPA */}
+      <div className="card" style={{ marginBottom: '1.5rem', padding: '1.25rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h2 style={{ fontSize: 15, fontWeight: 500 }}>Botigues a Catalunya</h2>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span className="badge badge-green">{tiendas.filter(t => t.lat && t.lng).length} ubicades</span>
+            {senseCoords > 0 && (
+              <span className="badge badge-amber">{senseCoords} sense coordenades</span>
+            )}
+          </div>
+        </div>
+        <div
+          id="mapa-tipics"
+          style={{ height: 380, borderRadius: 8, overflow: 'hidden', background: '#f0f0f0' }}
+        />
+        {senseCoords > 0 && (
+          <div style={{ fontSize: 12, color: '#6b6b68', marginTop: '0.5rem' }}>
+            Ves a Botigues → Editar i clica "Ubicar" per afegir coordenades a les botigues que falten.
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
