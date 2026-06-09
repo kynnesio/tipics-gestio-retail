@@ -7,7 +7,6 @@ import Dashboard from './pages/Dashboard'
 import Proveedores from './pages/Proveedores'
 import Productos from './pages/Productos'
 import Tiendas from './pages/Tiendas'
-import Stock from './pages/Stock'
 import Recuentos from './pages/Recuentos'
 import Liquidaciones from './pages/Liquidaciones'
 
@@ -41,7 +40,6 @@ function App() {
           <Route path="proveedores" element={<Proveedores />} />
           <Route path="productos" element={<Productos />} />
           <Route path="tiendas" element={<Tiendas />} />
-          <Route path="stock" element={<Stock />} />
           <Route path="recuentos" element={<Recuentos />} />
           <Route path="liquidaciones" element={<Liquidaciones />} />
         </Route>
