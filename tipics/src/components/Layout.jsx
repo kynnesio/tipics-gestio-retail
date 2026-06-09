@@ -3,10 +3,9 @@ import { supabase } from '../lib/supabase'
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: '▦' },
-  { to: '/tiendas', label: 'Tiendas', icon: '🏪' },
-  { to: '/proveedores', label: 'Proveedors', icon: '🤝' },
+  { to: '/tiendas', label: 'Botigues i estoc', icon: '🏪' },
+  { to: '/proveedores', label: 'Proveidors', icon: '🤝' },
   { to: '/productos', label: 'Productes', icon: '📦' },
-  { to: '/stock', label: 'Estoc', icon: '📋' },
   { to: '/recuentos', label: 'Recomptes', icon: '🔢' },
   { to: '/liquidaciones', label: 'Liquidacions', icon: '💶' },
 ]
@@ -59,7 +58,7 @@ export default function Layout() {
           </button>
         </div>
       </aside>
-      <main style={{ marginLeft: 220, flex: 1, padding: '2rem', maxWidth: 1100 }}>
+      <main style={{ marginLeft: 220, flex: 1, padding: '2rem', maxWidth: 1200 }}>
         <Outlet />
       </main>
     </div>
