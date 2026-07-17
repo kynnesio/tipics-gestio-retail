@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const ACTIONS = [
-  { id: 'entrada',   icon: '📦', label: 'Entrada\nde lot',    color: '#956C58', bg: '#F5EDE3', desc: 'Registra kg del proveïdor' },
-  { id: 'conversio', icon: '⚖️', label: 'Kg →\nUnitats',      color: '#6B4F3A', bg: '#EDE6DE', desc: 'Converteix a unitats envasades' },
+  { id: 'entrada',   icon: '📦', label: 'Entrada\nde lot',    color: '#956C58', bg: '#F5EDE3', desc: 'Registra kg o unitats del proveïdor' },
+  { id: 'conversio', icon: '⚖️', label: 'Kg →\nUnitats',      color: '#6B4F3A', bg: '#EDE6DE', desc: 'Converteix kg a unitats envasades' },
   { id: 'enviament', icon: '🚚', label: 'Enviar a\nbotiga',    color: '#212322', bg: '#E6E6E5', desc: 'Porta producte al punt de venda' },
   { id: 'venda',     icon: '💰', label: 'Venda',               color: '#2A5A3A', bg: '#E3EFE7', desc: 'Registra una venda' },
   { id: 'mostra',    icon: '🎁', label: 'Mostra /\nRegal',     color: '#7A4F1A', bg: '#F0E8DC', desc: 'Tast, mostra o obsequi' },
@@ -36,7 +36,7 @@ export default function Home() {
 
   const loadData = async () => {
     const [{ data: prods }, { data: tiend }, { data: lotsData }] = await Promise.all([
-      supabase.from('productos').select('id, nombre, sku, pvp').eq('activo', true).order('sku'),
+      supabase.from('productos').select('id, nombre, sku, pvp, tipus_unitat').eq('activo', true).order('sku'),
       supabase.from('tiendas').select('id, nombre').eq('activa', true).order('nombre'),
       supabase.from('lots').select('*').order('data_caducitat', { ascending: true }),
     ])
@@ -59,7 +59,7 @@ export default function Home() {
   useEffect(() => {
     if (!action) return
     const defaults = {
-      entrada:   { producto_id: '', numero_lot: '', data_caducitat: '', kg_inicials: '', notes: '' },
+      entrada:   { producto_id: '', numero_lot: '', data_caducitat: '', kg_inicials: '', unitats_inicials: '', notes: '' },
       conversio: { lot_id: '', kg_usats: '', unitats_produides: '', notes: '' },
       enviament: { lot_id: '', tienda_id: '', quantitat: '', notes: '' },
       venda:     { lot_id: '', tienda_id: '', quantitat: '', preu_unitari: '', notes: '' },
@@ -69,6 +69,7 @@ export default function Home() {
     setForm(defaults[action] || {})
   }, [action])
 
+  // Auto-fill preu quan canvia el lot a venda
   useEffect(() => {
     if (action !== 'venda' || !form.lot_id) return
     const lot = lots.find(l => l.id === form.lot_id)
@@ -83,29 +84,58 @@ export default function Home() {
   const lotsEnviament = activeLots.filter(l => (l.unitats_magatzem || 0) > 0)
   const lotsVenda     = activeLots.filter(l => (l.unitats_botigues || 0) > 0)
   const lotsMostra    = activeLots.filter(l => (l.unitats_magatzem || 0) + (l.unitats_botigues || 0) > 0)
-  const selectedLot  = lots.find(l => l.id === form.lot_id)
-  const selectedProd = selectedLot ? productos.find(p => p.id === selectedLot.producto_id) : null
+  const selectedLot   = lots.find(l => l.id === form.lot_id)
+  const selectedProd  = selectedLot ? productos.find(p => p.id === selectedLot.producto_id) : null
+
+  // Producte seleccionat a l'entrada
+  const entradaProd   = productos.find(p => p.id === form.producto_id)
+  const entradaEsKg   = entradaProd?.tipus_unitat === 'kg'
 
   const handleSave = async () => {
     setSaving(true)
     try {
       const avui = new Date().toISOString().split('T')[0]
 
+      // ── ENTRADA ──────────────────────────────────────
       if (action === 'entrada') {
-        if (!form.producto_id || !form.numero_lot || !form.kg_inicials) { alert('Omple els camps obligatoris.'); setSaving(false); return }
-        const kgIni = parseFloat(form.kg_inicials)
-        const { data: lot, error } = await supabase.from('lots').insert({
-          producto_id: form.producto_id, numero_lot: form.numero_lot,
-          data_caducitat: form.data_caducitat || null,
-          kg_inicials: kgIni, kg_restants: kgIni, estat: 'actiu', notes: form.notes || null,
-        }).select().single()
-        if (error) throw error
-        await supabase.from('moviments').insert({
-          lot_id: lot.id, producto_id: form.producto_id,
-          tipus: 'entrada_kg', quantitat: kgIni, unitat: 'kg', data: avui, notes: form.notes || null,
-        })
+        if (!form.producto_id || !form.numero_lot) { alert('Omple els camps obligatoris.'); setSaving(false); return }
+
+        if (entradaEsKg) {
+          // Entrada en kg → caldrà fer Conversió després
+          if (!form.kg_inicials) { alert('Introdueix els kg rebuts.'); setSaving(false); return }
+          const kgIni = parseFloat(form.kg_inicials)
+          const { data: lot, error } = await supabase.from('lots').insert({
+            producto_id: form.producto_id, numero_lot: form.numero_lot,
+            data_caducitat: form.data_caducitat || null,
+            kg_inicials: kgIni, kg_restants: kgIni,
+            unitats_produides: 0, unitats_magatzem: 0,
+            estat: 'actiu', notes: form.notes || null,
+          }).select().single()
+          if (error) throw error
+          await supabase.from('moviments').insert({
+            lot_id: lot.id, producto_id: form.producto_id,
+            tipus: 'entrada_kg', quantitat: kgIni, unitat: 'kg', data: avui, notes: form.notes || null,
+          })
+        } else {
+          // Entrada en unitats → va directament al magatzem
+          if (!form.unitats_inicials) { alert('Introdueix les unitats rebudes.'); setSaving(false); return }
+          const udIni = parseInt(form.unitats_inicials)
+          const { data: lot, error } = await supabase.from('lots').insert({
+            producto_id: form.producto_id, numero_lot: form.numero_lot,
+            data_caducitat: form.data_caducitat || null,
+            kg_inicials: null, kg_restants: null,
+            unitats_produides: udIni, unitats_magatzem: udIni,
+            estat: 'actiu', notes: form.notes || null,
+          }).select().single()
+          if (error) throw error
+          await supabase.from('moviments').insert({
+            lot_id: lot.id, producto_id: form.producto_id,
+            tipus: 'entrada_ud', quantitat: udIni, unitat: 'ud', data: avui, notes: form.notes || null,
+          })
+        }
       }
 
+      // ── CONVERSIÓ ─────────────────────────────────────
       else if (action === 'conversio') {
         if (!form.lot_id || !form.kg_usats || !form.unitats_produides) { alert('Omple tots els camps.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
@@ -124,6 +154,7 @@ export default function Home() {
         })
       }
 
+      // ── ENVIAMENT ─────────────────────────────────────
       else if (action === 'enviament') {
         if (!form.lot_id || !form.tienda_id || !form.quantitat) { alert('Omple tots els camps.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
@@ -140,6 +171,7 @@ export default function Home() {
         await updateLotEstat(form.lot_id)
       }
 
+      // ── VENDA ─────────────────────────────────────────
       else if (action === 'venda') {
         if (!form.lot_id || !form.tienda_id || !form.quantitat) { alert('Omple tots els camps.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
@@ -157,6 +189,7 @@ export default function Home() {
         await updateLotEstat(form.lot_id)
       }
 
+      // ── MOSTRA ────────────────────────────────────────
       else if (action === 'mostra') {
         if (!form.lot_id || !form.quantitat) { alert('Omple els camps obligatoris.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
@@ -171,6 +204,7 @@ export default function Home() {
         })
       }
 
+      // ── MERMA ─────────────────────────────────────────
       else if (action === 'merma') {
         if (!form.lot_id || !form.quantitat) { alert('Omple els camps obligatoris.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
@@ -209,7 +243,7 @@ export default function Home() {
         <div style={{ width: 28, height: 2, background: '#956C58', marginTop: 6 }} />
       </div>
 
-      {/* Stats ràpides */}
+      {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: '1.75rem' }}>
         {[
           { label: 'Magatzem', value: stats.magatzem, unit: 'ud' },
@@ -259,23 +293,56 @@ export default function Home() {
               <button className="btn btn-sm" onClick={() => setAction(null)}>✕</button>
             </div>
 
+            {/* ── ENTRADA ── */}
             {action === 'entrada' && (
               <div>
                 <div className="form-group"><label>Producte (SKU) *</label>
                   <select value={form.producto_id} onChange={f('producto_id')}>
-                    <option value="">Selecciona...</option>
-                    {productos.map(p => <option key={p.id} value={p.id}>{p.sku ? `${p.sku} — ` : ''}{p.nombre}</option>)}
+                    <option value="">Selecciona producte...</option>
+                    {productos.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.sku ? `${p.sku} — ` : ''}{p.nombre}
+                        {p.tipus_unitat === 'kg' ? ' (kg)' : ' (unitats)'}
+                      </option>
+                    ))}
                   </select>
                 </div>
+
+                {/* Indicador del tipus */}
+                {form.producto_id && (
+                  <div style={{ background: entradaEsKg ? 'var(--c-cream-light)' : '#E3EFE7', borderRadius: 6, padding: '6px 12px', marginBottom: '1rem', fontSize: 12, color: entradaEsKg ? '#956C58' : '#2A5A3A' }}>
+                    {entradaEsKg
+                      ? '⚖️ Producte en kg — caldrà fer una Conversió per obtenir unitats'
+                      : '📦 Producte en unitats — aniran directament al magatzem'}
+                  </div>
+                )}
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group"><label>Número de lot *</label><input value={form.numero_lot} onChange={f('numero_lot')} placeholder="L-2026-001" /></div>
-                  <div className="form-group"><label>Data caducitat</label><input type="date" value={form.data_caducitat} onChange={f('data_caducitat')} /></div>
+                  <div className="form-group"><label>Número de lot *</label>
+                    <input value={form.numero_lot} onChange={f('numero_lot')} placeholder={entradaEsKg ? 'G4171 / M4' : 'LL005'} />
+                  </div>
+                  <div className="form-group"><label>Data caducitat</label>
+                    <input type="date" value={form.data_caducitat} onChange={f('data_caducitat')} />
+                  </div>
                 </div>
-                <div className="form-group"><label>Kg rebuts *</label><input type="number" step="0.001" min="0" value={form.kg_inicials} onChange={f('kg_inicials')} placeholder="10.000" /></div>
-                <div className="form-group"><label>Notes</label><textarea rows={2} value={form.notes} onChange={f('notes')} /></div>
+
+                {entradaEsKg ? (
+                  <div className="form-group"><label>Kg rebuts *</label>
+                    <input type="number" step="0.001" min="0" value={form.kg_inicials} onChange={f('kg_inicials')} placeholder="12.000" />
+                  </div>
+                ) : (
+                  <div className="form-group"><label>Unitats rebudes *</label>
+                    <input type="number" min="1" value={form.unitats_inicials} onChange={f('unitats_inicials')} placeholder="144" />
+                  </div>
+                )}
+
+                <div className="form-group"><label>Notes</label>
+                  <textarea rows={2} value={form.notes} onChange={f('notes')} placeholder="Proveïdor, albarà..." />
+                </div>
               </div>
             )}
 
+            {/* ── CONVERSIÓ ── */}
             {action === 'conversio' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
@@ -284,10 +351,14 @@ export default function Home() {
                     {lotsConversio.map(l => <option key={l.id} value={l.id}>{lotLabel(l, productos)} · {l.kg_restants}kg disp.</option>)}
                   </select>
                 </div>
-                {lotsConversio.length === 0 && <p style={{ color: 'var(--c-text-muted)', fontSize: 13, marginBottom: '1rem' }}>Sense lots amb kg disponibles.</p>}
+                {lotsConversio.length === 0 && <p style={{ color: 'var(--c-text-muted)', fontSize: 13, marginBottom: '1rem' }}>Sense lots amb kg pendents de convertir.</p>}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group"><label>Kg usats *</label><input type="number" step="0.001" min="0" value={form.kg_usats} onChange={f('kg_usats')} placeholder="5.000" /></div>
-                  <div className="form-group"><label>Unitats produïdes *</label><input type="number" min="1" value={form.unitats_produides} onChange={f('unitats_produides')} placeholder="47" /></div>
+                  <div className="form-group"><label>Kg usats *</label>
+                    <input type="number" step="0.001" min="0" value={form.kg_usats} onChange={f('kg_usats')} placeholder="5.000" />
+                  </div>
+                  <div className="form-group"><label>Unitats produïdes *</label>
+                    <input type="number" min="1" value={form.unitats_produides} onChange={f('unitats_produides')} placeholder="47" />
+                  </div>
                 </div>
                 {form.kg_usats && form.unitats_produides && (
                   <div style={{ background: 'var(--c-cream-light)', borderRadius: 6, padding: '8px 12px', fontSize: 12, marginBottom: '1rem', color: 'var(--c-text-muted)' }}>
@@ -298,6 +369,7 @@ export default function Home() {
               </div>
             )}
 
+            {/* ── ENVIAMENT ── */}
             {action === 'enviament' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
@@ -306,7 +378,7 @@ export default function Home() {
                     {lotsEnviament.map(l => <option key={l.id} value={l.id}>{lotLabel(l, productos)} · {l.unitats_magatzem}ud mag.</option>)}
                   </select>
                 </div>
-                {lotsEnviament.length === 0 && <p style={{ color: 'var(--c-text-muted)', fontSize: 13, marginBottom: '1rem' }}>Sense unitats al magatzem. Primer fes una Conversió.</p>}
+                {lotsEnviament.length === 0 && <p style={{ color: 'var(--c-text-muted)', fontSize: 13, marginBottom: '1rem' }}>Sense unitats al magatzem.</p>}
                 <div className="form-group"><label>Botiga *</label>
                   <select value={form.tienda_id} onChange={f('tienda_id')}>
                     <option value="">Selecciona botiga...</option>
@@ -321,6 +393,7 @@ export default function Home() {
               </div>
             )}
 
+            {/* ── VENDA ── */}
             {action === 'venda' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
@@ -354,6 +427,7 @@ export default function Home() {
               </div>
             )}
 
+            {/* ── MOSTRA ── */}
             {action === 'mostra' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
@@ -383,6 +457,7 @@ export default function Home() {
               </div>
             )}
 
+            {/* ── MERMA ── */}
             {action === 'merma' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
