@@ -52,6 +52,20 @@ export default function Tiendas() {
     setGeocodificant(false)
   }
 
+
+  const handleDelete = async (r, e) => {
+    e?.stopPropagation()
+    const { count } = await supabase.from('moviments').select('id', { count: 'exact', head: true }).eq('tienda_id', r.id)
+    if ((count || 0) > 0) {
+      if (!confirm(`"${r.nombre}" té ${count} moviments associats. Es desactivarà (no s'esborrarà). Continuar?`)) return
+      await supabase.from('tiendas').update({ activa: false }).eq('id', r.id)
+    } else {
+      if (!confirm(`Eliminar "${r.nombre}" definitivament?`)) return
+      await supabase.from('tiendas').delete().eq('id', r.id)
+    }
+    load()
+  }
+
   const handleSave = async (e) => {
     e.preventDefault()
     setSaving(true)
@@ -116,7 +130,10 @@ export default function Tiendas() {
                       : <span className="badge badge-gray">—</span>}
                   </td>
                   <td><span className={`badge badge-${r.activa ? 'green' : 'gray'}`}>{r.activa ? 'Activa' : 'Inactiva'}</span></td>
-                  <td><button className="btn btn-sm" onClick={e => openEdit(r, e)}>Editar</button></td>
+                  <td style={{ display:'flex', gap:6 }}>
+                    <button className="btn btn-sm" onClick={e => openEdit(r, e)}>Editar</button>
+                    <button className="btn btn-sm btn-danger" onClick={e => handleDelete(r, e)}>Eliminar</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
