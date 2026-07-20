@@ -9,7 +9,7 @@ const ACTIONS = [
   { id: 'merma',     icon: '⚠️', label: 'Merma',               color: '#8B2A2A', bg: '#F0E3E3', desc: 'Pèrdua o rebuig' },
 ]
 
-const DIES_ALERTA = 75 // 2 mesos i mig
+const DIES_ALERTA = 75
 
 function lotLabel(lot, productos) {
   const prod = productos.find(p => p.id === lot.producto_id)
@@ -31,25 +31,32 @@ export default function Home() {
   const [lots, setLots] = useState([])
   const [stockPerSKU, setStockPerSKU] = useState([])
   const [alerta, setAlerta] = useState(0)
+  const [seguimentAlertes, setSeguimentAlertes] = useState([])
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(null)
 
   const loadData = async () => {
-    const [{ data: prods }, { data: tiend }, { data: lotsData }] = await Promise.all([
+    const [
+      { data: prods },
+      { data: tiend },
+      { data: lotsData },
+      { data: ultimsEnv },
+    ] = await Promise.all([
       supabase.from('productos').select('id, nombre, sku, pvp, tipus_unitat').eq('activo', true).order('sku'),
-      supabase.from('tiendas').select('id, nombre').eq('activa', true).order('nombre'),
+      supabase.from('tiendas').select('id, nombre, dies_seguiment, darrer_seguiment').eq('activa', true).order('nombre'),
       supabase.from('lots').select('*').order('data_caducitat', { ascending: true }),
+      supabase.from('moviments').select('tienda_id, data').eq('tipus', 'enviament').not('tienda_id', 'is', null),
     ])
+
     setProductos(prods || [])
     setTiendas(tiend || [])
     setLots(lotsData || [])
 
+    // Estoc per SKU
     const actius = (lotsData || []).filter(l => l.estat === 'actiu')
     const avui = new Date()
     const enNDies = new Date(avui.getTime() + DIES_ALERTA * 86400000)
-
-    // Estoc per SKU al magatzem
     const skuMap = {}
     actius.forEach(lot => {
       const prod = (prods || []).find(p => p.id === lot.producto_id)
@@ -58,15 +65,41 @@ export default function Home() {
     })
     setStockPerSKU(Object.entries(skuMap).sort((a, b) => a[0].localeCompare(b[0])))
     setAlerta(actius.filter(l => l.data_caducitat && new Date(l.data_caducitat) <= enNDies).length)
+
+    // Seguiment botigues
+    const ultimPerTienda = {}
+    ;(ultimsEnv || []).forEach(m => {
+      if (!ultimPerTienda[m.tienda_id] || m.data > ultimPerTienda[m.tienda_id])
+        ultimPerTienda[m.tienda_id] = m.data
+    })
+
+    const alertesSeg = (tiend || [])
+      .filter(t => {
+        const ultimEnv = ultimPerTienda[t.id]
+        if (!ultimEnv) return false
+        const darrerContacte = (t.darrer_seguiment && t.darrer_seguiment > ultimEnv)
+          ? t.darrer_seguiment : ultimEnv
+        const dies = Math.floor((avui - new Date(darrerContacte)) / 86400000)
+        return dies >= (t.dies_seguiment || 15)
+      })
+      .map(t => {
+        const ultimEnv = ultimPerTienda[t.id]
+        const darrerContacte = (t.darrer_seguiment && t.darrer_seguiment > ultimEnv)
+          ? t.darrer_seguiment : ultimEnv
+        const dies = Math.floor((avui - new Date(darrerContacte)) / 86400000)
+        return { ...t, dies, darrerContacte }
+      })
+      .sort((a, b) => b.dies - a.dies)
+
+    setSeguimentAlertes(alertesSeg)
   }
 
   useEffect(() => { loadData() }, [])
 
   useEffect(() => {
     if (!action) return
-    const prod = productos.find(p => p.id === form.producto_id)
     const defaults = {
-      entrada:   { producto_id: '', numero_lot: '', data_caducitat: '', tipus_rebuda: prod?.tipus_unitat || 'ud', quantitat_rebuda: '', notes: '' },
+      entrada:   { producto_id: '', numero_lot: '', data_caducitat: '', tipus_rebuda: 'ud', quantitat_rebuda: '', notes: '' },
       conversio: { lot_id: '', kg_usats: '', unitats_produides: '', notes: '' },
       enviament: { lot_id: '', tienda_id: '', quantitat: '', notes: '' },
       mostra:    { lot_id: '', quantitat: '', origen: 'magatzem', tienda_id: '', notes: '' },
@@ -75,7 +108,6 @@ export default function Home() {
     setForm(defaults[action] || {})
   }, [action])
 
-  // Auto-ajust tipus_rebuda quan canvia el producte a entrada
   useEffect(() => {
     if (action !== 'entrada' || !form.producto_id) return
     const prod = productos.find(p => p.id === form.producto_id)
@@ -83,92 +115,70 @@ export default function Home() {
   }, [form.producto_id])
 
   const f = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }))
-  const activeLots     = lots.filter(l => l.estat === 'actiu')
-  const lotsConversio  = activeLots.filter(l => (l.kg_restants || 0) > 0)
-  const lotsEnviament  = activeLots.filter(l => (l.unitats_magatzem || 0) > 0)
-  const lotsMostra     = activeLots.filter(l => (l.unitats_magatzem || 0) + (l.unitats_botigues || 0) > 0)
-  const selectedLot    = lots.find(l => l.id === form.lot_id)
+  const activeLots    = lots.filter(l => l.estat === 'actiu')
+  const lotsConversio = activeLots.filter(l => (l.kg_restants || 0) > 0)
+  const lotsEnviament = activeLots.filter(l => (l.unitats_magatzem || 0) > 0)
+  const lotsMostra    = activeLots.filter(l => (l.unitats_magatzem || 0) + (l.unitats_botigues || 0) > 0)
+  const selectedLot   = lots.find(l => l.id === form.lot_id)
+  const entradaProd   = productos.find(p => p.id === form.producto_id)
+
+  const handleContactat = async (tiendaId) => {
+    await supabase.from('tiendas')
+      .update({ darrer_seguiment: new Date().toISOString().split('T')[0] })
+      .eq('id', tiendaId)
+    await loadData()
+  }
 
   const handleSave = async () => {
     setSaving(true)
     try {
       const avui = new Date().toISOString().split('T')[0]
 
-      // ── ENTRADA ──────────────────────────────────────
       if (action === 'entrada') {
-        if (!form.producto_id || !form.numero_lot || !form.quantitat_rebuda) {
-          alert('Omple els camps obligatoris.'); setSaving(false); return
-        }
+        if (!form.producto_id || !form.numero_lot || !form.quantitat_rebuda) { alert('Omple els camps obligatoris.'); setSaving(false); return }
         const isKg = form.tipus_rebuda === 'kg'
         const qty  = parseFloat(form.quantitat_rebuda)
-
         if (isKg) {
           const { data: lot, error } = await supabase.from('lots').insert({
             producto_id: form.producto_id, numero_lot: form.numero_lot,
             data_caducitat: form.data_caducitat || null,
-            kg_inicials: qty, kg_restants: qty,
-            unitats_produides: 0, unitats_magatzem: 0,
+            kg_inicials: qty, kg_restants: qty, unitats_produides: 0, unitats_magatzem: 0,
             estat: 'actiu', notes: form.notes || null,
           }).select().single()
           if (error) throw error
-          await supabase.from('moviments').insert({
-            lot_id: lot.id, producto_id: form.producto_id,
-            tipus: 'entrada_kg', quantitat: qty, unitat: 'kg', data: avui, notes: form.notes || null,
-          })
+          await supabase.from('moviments').insert({ lot_id: lot.id, producto_id: form.producto_id, tipus: 'entrada_kg', quantitat: qty, unitat: 'kg', data: avui, notes: form.notes || null })
         } else {
           const ud = parseInt(qty)
           const { data: lot, error } = await supabase.from('lots').insert({
             producto_id: form.producto_id, numero_lot: form.numero_lot,
             data_caducitat: form.data_caducitat || null,
-            kg_inicials: null, kg_restants: null,
-            unitats_produides: ud, unitats_magatzem: ud,
+            kg_inicials: null, kg_restants: null, unitats_produides: ud, unitats_magatzem: ud,
             estat: 'actiu', notes: form.notes || null,
           }).select().single()
           if (error) throw error
-          await supabase.from('moviments').insert({
-            lot_id: lot.id, producto_id: form.producto_id,
-            tipus: 'entrada_ud', quantitat: ud, unitat: 'ud', data: avui, notes: form.notes || null,
-          })
+          await supabase.from('moviments').insert({ lot_id: lot.id, producto_id: form.producto_id, tipus: 'entrada_ud', quantitat: ud, unitat: 'ud', data: avui, notes: form.notes || null })
         }
       }
 
-      // ── CONVERSIÓ ─────────────────────────────────────
       else if (action === 'conversio') {
         if (!form.lot_id || !form.kg_usats || !form.unitats_produides) { alert('Omple tots els camps.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
-        const kgU = parseFloat(form.kg_usats)
-        const udP = parseInt(form.unitats_produides)
+        const kgU = parseFloat(form.kg_usats), udP = parseInt(form.unitats_produides)
         if (kgU > (lot.kg_restants || 0)) { alert(`Només tens ${lot.kg_restants}kg disponibles.`); setSaving(false); return }
-        await supabase.from('lots').update({
-          kg_restants: (lot.kg_restants || 0) - kgU,
-          unitats_produides: (lot.unitats_produides || 0) + udP,
-          unitats_magatzem: (lot.unitats_magatzem || 0) + udP,
-        }).eq('id', form.lot_id)
-        await supabase.from('moviments').insert({
-          lot_id: form.lot_id, producto_id: lot.producto_id,
-          tipus: 'conversio_ud', quantitat: udP, unitat: 'ud', data: avui,
-          notes: `${kgU}kg → ${udP} unitats${form.notes ? ' · ' + form.notes : ''}`,
-        })
+        await supabase.from('lots').update({ kg_restants: (lot.kg_restants || 0) - kgU, unitats_produides: (lot.unitats_produides || 0) + udP, unitats_magatzem: (lot.unitats_magatzem || 0) + udP }).eq('id', form.lot_id)
+        await supabase.from('moviments').insert({ lot_id: form.lot_id, producto_id: lot.producto_id, tipus: 'conversio_ud', quantitat: udP, unitat: 'ud', data: avui, notes: `${kgU}kg → ${udP} unitats${form.notes ? ' · ' + form.notes : ''}` })
       }
 
-      // ── ENVIAR A BOTIGA ───────────────────────────────
       else if (action === 'enviament') {
         if (!form.lot_id || !form.tienda_id || !form.quantitat) { alert('Omple tots els camps.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
         const q = parseInt(form.quantitat)
         if (q > (lot.unitats_magatzem || 0)) { alert(`Només tens ${lot.unitats_magatzem} unitats al magatzem.`); setSaving(false); return }
-        await supabase.from('lots').update({
-          unitats_magatzem: (lot.unitats_magatzem || 0) - q,
-          unitats_botigues: (lot.unitats_botigues || 0) + q,
-        }).eq('id', form.lot_id)
-        await supabase.from('moviments').insert({
-          lot_id: form.lot_id, producto_id: lot.producto_id, tienda_id: form.tienda_id,
-          tipus: 'enviament', quantitat: q, unitat: 'ud', data: avui, notes: form.notes || null,
-        })
+        await supabase.from('lots').update({ unitats_magatzem: (lot.unitats_magatzem || 0) - q, unitats_botigues: (lot.unitats_botigues || 0) + q }).eq('id', form.lot_id)
+        await supabase.from('moviments').insert({ lot_id: form.lot_id, producto_id: lot.producto_id, tienda_id: form.tienda_id, tipus: 'enviament', quantitat: q, unitat: 'ud', data: avui, notes: form.notes || null })
         await updateLotEstat(form.lot_id)
       }
 
-      // ── MOSTRA ────────────────────────────────────────
       else if (action === 'mostra') {
         if (!form.lot_id || !form.quantitat) { alert('Omple els camps obligatoris.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
@@ -177,27 +187,18 @@ export default function Home() {
         if (form.origen === 'botiga') update.unitats_botigues = Math.max(0, (lot.unitats_botigues || 0) - q)
         else update.unitats_magatzem = Math.max(0, (lot.unitats_magatzem || 0) - q)
         await supabase.from('lots').update(update).eq('id', form.lot_id)
-        await supabase.from('moviments').insert({
-          lot_id: form.lot_id, producto_id: lot.producto_id, tienda_id: form.tienda_id || null,
-          tipus: 'mostra', quantitat: q, unitat: 'ud', data: avui, notes: form.notes || null,
-        })
+        await supabase.from('moviments').insert({ lot_id: form.lot_id, producto_id: lot.producto_id, tienda_id: form.tienda_id || null, tipus: 'mostra', quantitat: q, unitat: 'ud', data: avui, notes: form.notes || null })
       }
 
-      // ── MERMA ─────────────────────────────────────────
       else if (action === 'merma') {
         if (!form.lot_id || !form.quantitat) { alert('Omple els camps obligatoris.'); setSaving(false); return }
         const lot = lots.find(l => l.id === form.lot_id)
-        const q = parseFloat(form.quantitat)
-        const isKg = form.tipus_merma === 'kg'
+        const q = parseFloat(form.quantitat), isKg = form.tipus_merma === 'kg'
         const update = {}
         if (isKg) update.kg_restants = Math.max(0, (lot.kg_restants || 0) - q)
         else { update.unitats_magatzem = Math.max(0, (lot.unitats_magatzem || 0) - q); update.unitats_merma = (lot.unitats_merma || 0) + q }
         await supabase.from('lots').update(update).eq('id', form.lot_id)
-        await supabase.from('moviments').insert({
-          lot_id: form.lot_id, producto_id: lot.producto_id,
-          tipus: 'merma', quantitat: q, unitat: isKg ? 'kg' : 'ud',
-          motiu_merma: form.motiu, data: avui, notes: form.notes || null,
-        })
+        await supabase.from('moviments').insert({ lot_id: form.lot_id, producto_id: lot.producto_id, tipus: 'merma', quantitat: q, unitat: isKg ? 'kg' : 'ud', motiu_merma: form.motiu, data: avui, notes: form.notes || null })
         await updateLotEstat(form.lot_id)
       }
 
@@ -222,7 +223,35 @@ export default function Home() {
         <div style={{ width: 28, height: 2, background: '#956C58', marginTop: 6 }} />
       </div>
 
-      {/* Estoc per SKU al magatzem */}
+      {/* Alertes de seguiment */}
+      {seguimentAlertes.length > 0 && (
+        <div style={{ background: '#F5EDE3', border: '1px solid rgba(149,108,88,0.3)', borderRadius: 10, padding: '0.9rem 1.1rem', marginBottom: '1.5rem' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#956C58', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.75rem' }}>
+            ⏰ Botigues per contactar ({seguimentAlertes.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {seguimentAlertes.map(t => (
+              <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{t.nombre}</span>
+                  <span style={{ fontSize: 11, color: '#7A5445', marginLeft: 8 }}>
+                    fa {t.dies} dies
+                    {t.dies > (t.dies_seguiment || 15) + 7 && ' ⚠️'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleContactat(t.id)}
+                  style={{ background: '#956C58', color: 'white', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 11, fontWeight: 500, cursor: 'pointer', fontFamily: 'Inter Tight, sans-serif' }}
+                >
+                  Contactat ✓
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Estoc per SKU */}
       <div style={{ background: 'white', border: '1px solid var(--c-border)', borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.75rem' }}>
         <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--c-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.75rem' }}>
           Estoc al magatzem
@@ -247,7 +276,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* Bombolles — 5 accions */}
+      {/* Bombolles */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
         {ACTIONS.map((a, i) => (
           <button key={a.id} onClick={() => setAction(a.id)} style={{
@@ -257,7 +286,6 @@ export default function Home() {
             alignItems: 'center', gap: 8,
             transition: 'transform 0.12s, box-shadow 0.12s',
             boxShadow: '0 1px 6px rgba(0,0,0,0.05)',
-            // Centra l'últim element si la fila no és completa
             ...(ACTIONS.length % 3 !== 0 && i === ACTIONS.length - 1 ? { gridColumn: '2' } : {}),
           }}
           onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 18px rgba(0,0,0,0.1)' }}
@@ -282,38 +310,27 @@ export default function Home() {
               <button className="btn btn-sm" onClick={() => setAction(null)}>✕</button>
             </div>
 
-            {/* ── ENTRADA ── */}
             {action === 'entrada' && (
               <div>
                 <div className="form-group"><label>Producte (SKU) *</label>
                   <select value={form.producto_id} onChange={f('producto_id')}>
                     <option value="">Selecciona producte...</option>
-                    {productos.map(p => (
-                      <option key={p.id} value={p.id}>{p.sku ? `${p.sku} — ` : ''}{p.nombre}</option>
-                    ))}
+                    {productos.map(p => <option key={p.id} value={p.id}>{p.sku ? `${p.sku} — ` : ''}{p.nombre}</option>)}
                   </select>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group"><label>Número de lot *</label>
-                    <input value={form.numero_lot} onChange={f('numero_lot')} placeholder="G4171 / LL005" />
-                  </div>
-                  <div className="form-group"><label>Data caducitat</label>
-                    <input type="date" value={form.data_caducitat} onChange={f('data_caducitat')} />
-                  </div>
+                  <div className="form-group"><label>Número de lot *</label><input value={form.numero_lot} onChange={f('numero_lot')} placeholder="G4171 / LL005" /></div>
+                  <div className="form-group"><label>Data caducitat</label><input type="date" value={form.data_caducitat} onChange={f('data_caducitat')} /></div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label>Format</label>
+                  <div className="form-group"><label>Format</label>
                     <select value={form.tipus_rebuda} onChange={f('tipus_rebuda')}>
                       <option value="ud">Unitats</option>
                       <option value="kg">Kg</option>
                     </select>
                   </div>
-                  <div className="form-group">
-                    <label>Rebuda *</label>
-                    <input type="number" step={form.tipus_rebuda === 'kg' ? '0.001' : '1'} min="0"
-                      value={form.quantitat_rebuda} onChange={f('quantitat_rebuda')}
-                      placeholder={form.tipus_rebuda === 'kg' ? '12.000' : '144'} />
+                  <div className="form-group"><label>Rebuda *</label>
+                    <input type="number" step={form.tipus_rebuda === 'kg' ? '0.001' : '1'} min="0" value={form.quantitat_rebuda} onChange={f('quantitat_rebuda')} placeholder={form.tipus_rebuda === 'kg' ? '12.000' : '144'} />
                   </div>
                 </div>
                 {form.tipus_rebuda === 'kg' && (
@@ -321,13 +338,10 @@ export default function Home() {
                     ⚖️ Entrada en kg — caldrà fer una Conversió per obtenir unitats
                   </div>
                 )}
-                <div className="form-group"><label>Notes</label>
-                  <textarea rows={2} value={form.notes} onChange={f('notes')} placeholder="Proveïdor, albarà..." />
-                </div>
+                <div className="form-group"><label>Notes</label><textarea rows={2} value={form.notes} onChange={f('notes')} placeholder="Proveïdor, albarà..." /></div>
               </div>
             )}
 
-            {/* ── CONVERSIÓ ── */}
             {action === 'conversio' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
@@ -336,14 +350,10 @@ export default function Home() {
                     {lotsConversio.map(l => <option key={l.id} value={l.id}>{lotLabel(l, productos)} · {l.kg_restants}kg disp.</option>)}
                   </select>
                 </div>
-                {lotsConversio.length === 0 && <p style={{ color: 'var(--c-text-muted)', fontSize: 13, marginBottom: '1rem' }}>Sense lots amb kg pendents de convertir.</p>}
+                {lotsConversio.length === 0 && <p style={{ color: 'var(--c-text-muted)', fontSize: 13, marginBottom: '1rem' }}>Sense lots amb kg pendents.</p>}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group"><label>Kg usats *</label>
-                    <input type="number" step="0.001" min="0" value={form.kg_usats} onChange={f('kg_usats')} placeholder="5.000" />
-                  </div>
-                  <div className="form-group"><label>Unitats produïdes *</label>
-                    <input type="number" min="1" value={form.unitats_produides} onChange={f('unitats_produides')} placeholder="47" />
-                  </div>
+                  <div className="form-group"><label>Kg usats *</label><input type="number" step="0.001" min="0" value={form.kg_usats} onChange={f('kg_usats')} placeholder="5.000" /></div>
+                  <div className="form-group"><label>Unitats produïdes *</label><input type="number" min="1" value={form.unitats_produides} onChange={f('unitats_produides')} placeholder="47" /></div>
                 </div>
                 {form.kg_usats && form.unitats_produides && (
                   <div style={{ background: 'var(--c-cream-light)', borderRadius: 6, padding: '8px 12px', fontSize: 12, marginBottom: '1rem', color: 'var(--c-text-muted)' }}>
@@ -354,7 +364,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* ── ENVIAR A BOTIGA ── */}
             {action === 'enviament' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
@@ -363,7 +372,7 @@ export default function Home() {
                     {lotsEnviament.map(l => <option key={l.id} value={l.id}>{lotLabel(l, productos)} · {l.unitats_magatzem}ud mag.</option>)}
                   </select>
                 </div>
-                {lotsEnviament.length === 0 && <p style={{ color: 'var(--c-text-muted)', fontSize: 13, marginBottom: '1rem' }}>Sense unitats al magatzem. Primer fes una Entrada o Conversió.</p>}
+                {lotsEnviament.length === 0 && <p style={{ color: 'var(--c-text-muted)', fontSize: 13, marginBottom: '1rem' }}>Sense unitats al magatzem.</p>}
                 <div className="form-group"><label>Botiga *</label>
                   <select value={form.tienda_id} onChange={f('tienda_id')}>
                     <option value="">Selecciona botiga...</option>
@@ -378,7 +387,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* ── MOSTRA ── */}
             {action === 'mostra' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
@@ -388,9 +396,7 @@ export default function Home() {
                   </select>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group"><label>Unitats *</label>
-                    <input type="number" min="1" value={form.quantitat} onChange={f('quantitat')} placeholder="1" />
-                  </div>
+                  <div className="form-group"><label>Unitats *</label><input type="number" min="1" value={form.quantitat} onChange={f('quantitat')} placeholder="1" /></div>
                   <div className="form-group"><label>Origen</label>
                     <select value={form.origen} onChange={f('origen')}>
                       <option value="magatzem">Magatzem</option>
@@ -406,13 +412,10 @@ export default function Home() {
                     </select>
                   </div>
                 )}
-                <div className="form-group"><label>Notes</label>
-                  <textarea rows={2} value={form.notes} onChange={f('notes')} placeholder="Per a qui és..." />
-                </div>
+                <div className="form-group"><label>Notes</label><textarea rows={2} value={form.notes} onChange={f('notes')} placeholder="Per a qui és..." /></div>
               </div>
             )}
 
-            {/* ── MERMA ── */}
             {action === 'merma' && (
               <div>
                 <div className="form-group"><label>Lot *</label>
@@ -428,9 +431,7 @@ export default function Home() {
                       <option value="kg">Kg</option>
                     </select>
                   </div>
-                  <div className="form-group"><label>Quantitat *</label>
-                    <input type="number" step="0.001" min="0" value={form.quantitat} onChange={f('quantitat')} />
-                  </div>
+                  <div className="form-group"><label>Quantitat *</label><input type="number" step="0.001" min="0" value={form.quantitat} onChange={f('quantitat')} /></div>
                   <div className="form-group"><label>Motiu</label>
                     <select value={form.motiu} onChange={f('motiu')}>
                       <option value="caducitat">Caducitat</option>
@@ -441,9 +442,7 @@ export default function Home() {
                     </select>
                   </div>
                 </div>
-                <div className="form-group"><label>Notes</label>
-                  <textarea rows={2} value={form.notes} onChange={f('notes')} />
-                </div>
+                <div className="form-group"><label>Notes</label><textarea rows={2} value={form.notes} onChange={f('notes')} /></div>
               </div>
             )}
 
