@@ -48,7 +48,12 @@ function FluxModal({ lot, moviments, productos, proveedores, onClose }) {
       <div className="modal" style={{ maxWidth:440 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <div style={{ fontSize:17, fontWeight:600 }}>{lot.numero_lot}</div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ fontSize:17, fontWeight:600 }}>{lot.numero_lot}</span>
+            {lot.numero_lot_extern && (
+              <span style={{ fontSize:12, color:'var(--text-3)', background:'var(--cream-lt)', padding:'1px 8px', borderRadius:5 }}>{lot.numero_lot_extern}</span>
+            )}
+          </div>
             <div style={{ fontSize:12, color:'var(--text-2)', marginTop:1 }}>{prod?.sku} · {prod?.nombre}</div>
           </div>
           <button className="btn btn-sm" onClick={onClose} style={{ borderRadius:'50%', width:32, height:32, padding:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>×</button>
@@ -205,6 +210,9 @@ export default function Tracabilitat() {
                       <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                         <div style={{ width:7, height:7, borderRadius:'50%', background:ESTAT_DOT[lot.estat] || '#ccc', flexShrink:0 }} />
                         <span style={{ fontWeight:600, fontSize:15 }}>{lot.numero_lot}</span>
+                        {lot.numero_lot_extern && (
+                          <span style={{ fontSize:11, color:'var(--text-3)', background:'var(--cream-lt)', padding:'1px 7px', borderRadius:5 }}>{lot.numero_lot_extern}</span>
+                        )}
                         <span style={{ fontSize:12, color:'var(--brand)', fontWeight:500 }}>{provNom}</span>
                         {lot.data_caducitat && <span style={{ fontSize:11, color:'var(--text-3)' }}>· {lot.data_caducitat}</span>}
                       </div>
