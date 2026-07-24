@@ -107,7 +107,7 @@ export default function Home() {
     if (!action) return
     const prod = productos.find(p => p.id === form.producto_id)
     const defaults = {
-      entrada:   { producto_id: '', numero_lot: '', data_caducitat: '', tipus_rebuda: prod?.tipus_unitat || 'ud', quantitat_rebuda: '', notes: '' },
+      entrada:   { producto_id: '', numero_lot: '', numero_lot_extern: '', data_caducitat: '', tipus_rebuda: prod?.tipus_unitat || 'ud', quantitat_rebuda: '', notes: '' },
       conversio: { lot_id: '', kg_usats: '', unitats_produides: '', notes: '' },
       enviament: { tienda_id: '', linies: [{ id: 1, lot_id: '', quantitat: '' }], notes: '' },
       mostra:    { lot_id: '', quantitat: '', origen: 'magatzem', tienda_id: '', notes: '' },
@@ -151,12 +151,12 @@ export default function Home() {
         if (!form.producto_id || !form.numero_lot || !form.quantitat_rebuda) { alert('Omple els camps obligatoris.'); setSaving(false); return }
         const isKg = form.tipus_rebuda === 'kg', qty = parseFloat(form.quantitat_rebuda)
         if (isKg) {
-          const { data: lot, error } = await supabase.from('lots').insert({ producto_id: form.producto_id, numero_lot: form.numero_lot, data_caducitat: form.data_caducitat || null, kg_inicials: qty, kg_restants: qty, unitats_produides: 0, unitats_magatzem: 0, estat: 'actiu', notes: form.notes || null }).select().single()
+          const { data: lot, error } = await supabase.from('lots').insert({ producto_id: form.producto_id, numero_lot: form.numero_lot, numero_lot_extern: form.numero_lot_extern || null, data_caducitat: form.data_caducitat || null, kg_inicials: qty, kg_restants: qty, unitats_produides: 0, unitats_magatzem: 0, estat: 'actiu', notes: form.notes || null }).select().single()
           if (error) throw error
           await supabase.from('moviments').insert({ lot_id: lot.id, producto_id: form.producto_id, tipus: 'entrada_kg', quantitat: qty, unitat: 'kg', data: avui, notes: form.notes || null })
         } else {
           const ud = parseInt(qty)
-          const { data: lot, error } = await supabase.from('lots').insert({ producto_id: form.producto_id, numero_lot: form.numero_lot, data_caducitat: form.data_caducitat || null, kg_inicials: null, kg_restants: null, unitats_produides: ud, unitats_magatzem: ud, estat: 'actiu', notes: form.notes || null }).select().single()
+          const { data: lot, error } = await supabase.from('lots').insert({ producto_id: form.producto_id, numero_lot: form.numero_lot, numero_lot_extern: form.numero_lot_extern || null, data_caducitat: form.data_caducitat || null, kg_inicials: null, kg_restants: null, unitats_produides: ud, unitats_magatzem: ud, estat: 'actiu', notes: form.notes || null }).select().single()
           if (error) throw error
           await supabase.from('moviments').insert({ lot_id: lot.id, producto_id: form.producto_id, tipus: 'entrada_ud', quantitat: ud, unitat: 'ud', data: avui, notes: form.notes || null })
         }
@@ -340,9 +340,10 @@ export default function Home() {
                   </select>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group"><label>Número de lot *</label><input value={form.numero_lot} onChange={f('numero_lot')} placeholder="G4171 / LL005" /></div>
-                  <div className="form-group"><label>Data caducitat</label><input type="date" value={form.data_caducitat} onChange={f('data_caducitat')} /></div>
+                  <div className="form-group"><label>Núm. lot intern *</label><input value={form.numero_lot} onChange={f('numero_lot')} placeholder="L019, LL005..." style={{ fontFamily:'monospace' }} /></div>
+                  <div className="form-group"><label>Núm. lot extern (productor)</label><input value={form.numero_lot_extern} onChange={f('numero_lot_extern')} placeholder="G4172, Sauleda..." /></div>
                 </div>
+                <div className="form-group"><label>Data caducitat</label><input type="date" value={form.data_caducitat} onChange={f('data_caducitat')} /></div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
                   <div className="form-group"><label>Format</label>
                     <select value={form.tipus_rebuda} onChange={f('tipus_rebuda')}>
